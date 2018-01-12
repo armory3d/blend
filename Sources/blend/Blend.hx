@@ -30,6 +30,7 @@ class Blend {
 		this.pos = 0;
 
 		if (readChars(7) == 'BLENDER') parse();
+		// else decompress();
 	}
 
 	public function dir(type:String):Array<String> {
@@ -53,7 +54,7 @@ class Blend {
 		var ds = getStruct(dna, typeIndex);
 		var handles:Array<Handle> = [];
 		for (b in blocks) {
-			if (b.sdnaIndex == typeIndex) {
+			if (dna.structs[b.sdnaIndex].type == typeIndex) {
 				var h = new Handle();
 				handles.push(h);
 				h.block = b;
@@ -265,6 +266,16 @@ class Handle {
 	public var offset:Int = 0; // Block data bytes offset
 	public var ds:DnaStruct;
 	public function new() {}
+	function traverse() {
+		var n = dna.names[ds.fieldNames[j]];
+		if (n.indexOf('[') > 0) {
+			var c = Std.parseInt(n.substring(n.indexOf('[') + 1, n.indexOf(']')));
+			size *= c;
+		}
+		else if (n.indexOf('*') > 0) {
+			size = block.blend.pointerSize;
+		}
+	}
 	public function get(name:String):Dynamic {
 		// Return raw type or structure
 		var dna = ds.dna;
@@ -272,21 +283,31 @@ class Handle {
 			var nameIndex = ds.fieldNames[i];
 			if (name == dna.names[nameIndex]) {
 				var typeIndex = ds.fieldTypes[i];
-				var typeOffset = offset;
-				for (j in 0...i) typeOffset += dna.typesLength[ds.fieldTypes[j]];
-
+				var newOffset = offset;
+				for (j in 0...i) newOffset += traverseSize();
 				// Raw type
 				if (dna.types[typeIndex] == 'int') {
 					var blend = block.blend;
-					blend.pos = block.pos + typeOffset;
+					blend.pos = block.pos + newOffset;
 					return blend.read32();
 				}
+				else if (dna.types[typeIndex] == 'char') { return 0; } // 1
+				else if (dna.types[typeIndex] == 'uchar') { return 0; } // 1
+				else if (dna.types[typeIndex] == 'short') { return 0; } // 2
+				else if (dna.types[typeIndex] == 'ushort') { return 0; } // 2
+				else if (dna.types[typeIndex] == 'long') { return 0; } // 4
+				else if (dna.types[typeIndex] == 'ulong') { return 0; } //4
+				else if (dna.types[typeIndex] == 'float') { return 0; } // 4
+				else if (dna.types[typeIndex] == 'double') { return 0; } // 8
+				else if (dna.types[typeIndex] == 'int64_t') { return 0; } // 8
+				else if (dna.types[typeIndex] == 'uint64_t') { return 0; } // 8
+				else if (dna.types[typeIndex] == 'void') { return 0; } // 0
 
 				// Structure
 				var h = new Handle();
 				h.ds = Blend.getStruct(dna, typeIndex);
 				h.block = block;
-				h.offset = typeOffset;
+				h.offset = newOffset;
 				return h;
 			}
 		}
