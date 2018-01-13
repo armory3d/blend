@@ -5,8 +5,9 @@
 // https://web.archive.org/web/20170630054951/http://www.atmind.nl/blender/mystery_ot_blend.html
 // Usage:
 // var bl = new Blend(blob:kha.Blob);
+// trace(bl.dir("Scene"));
 // var scenes = bl.get("Scene");
-// trace(scenes[0].get("id").get("name");
+// trace(scenes[0].get("id").get("name"));
 package blend;
 
 // https://github.com/Kode/Kha
@@ -213,7 +214,7 @@ class Blend {
 		return i;
 	}
 
-	function readString():String {
+	public function readString():String {
 		var s = '';
 		while (true) {
 			var ch = read8();
@@ -223,13 +224,13 @@ class Blend {
 		return s;
 	}
 
-	function readChars(len:Int):String {
+	public function readChars(len:Int):String {
 		var s = '';
 		for (i in 0...len) s += readChar();
 		return s;
 	}
 
-	function readChar():String {
+	public function readChar():String {
 		return String.fromCharCode(read8());
 	}
 }
@@ -266,43 +267,53 @@ class Handle {
 	public var offset:Int = 0; // Block data bytes offset
 	public var ds:DnaStruct;
 	public function new() {}
-	function traverse() {
-		var n = dna.names[ds.fieldNames[j]];
-		if (n.indexOf('[') > 0) {
-			var c = Std.parseInt(n.substring(n.indexOf('[') + 1, n.indexOf(']')));
-			size *= c;
-		}
-		else if (n.indexOf('*') > 0) {
-			size = block.blend.pointerSize;
-		}
+	function getSize(index:Int):Int {
+		var nameIndex = ds.fieldNames[index];
+		var typeIndex = ds.fieldTypes[index];
+		var dna = ds.dna;
+		var n = dna.names[nameIndex];
+		var size = 0;
+		if (n.indexOf('*') >= 0) size = block.blend.pointerSize;
+		else size = dna.typesLength[typeIndex];
+		if (n.indexOf('[') > 0) size *= Std.parseInt(n.substring(n.indexOf('[') + 1, n.indexOf(']')));
+		return size;
+	}
+	function baseName(s:String):String {
+		if (s.charAt(0) == '*') s = s.substring(1, s.length);
+		if (s.charAt(s.length - 1) == ']') s = s.substring(0, s.indexOf('['));
+		return s;
 	}
 	public function get(name:String):Dynamic {
 		// Return raw type or structure
 		var dna = ds.dna;
 		for (i in 0...ds.fieldNames.length) {
 			var nameIndex = ds.fieldNames[i];
-			if (name == dna.names[nameIndex]) {
+			var dnaName = dna.names[nameIndex];
+			if (name == baseName(dnaName)) {
 				var typeIndex = ds.fieldTypes[i];
+				var type = dna.types[typeIndex];
 				var newOffset = offset;
-				for (j in 0...i) newOffset += traverseSize();
+				for (j in 0...i) newOffset += getSize(j);
 				// Raw type
-				if (dna.types[typeIndex] == 'int') {
+				if (typeIndex < 12) {
 					var blend = block.blend;
 					blend.pos = block.pos + newOffset;
-					return blend.read32();
+					if (type == 'int') return blend.read32();
+					else if (type == 'char') {
+						var isString = dnaName.charAt(dnaName.length - 1) == ']';
+						return isString ? blend.readString() : blend.read8();
+					}
+					else if (type == 'uchar') { return blend.read8(); }
+					else if (type == 'short') { return blend.read16(); }
+					else if (type == 'ushort') { return blend.read16(); }
+					else if (type == 'long') { return blend.read32(); }
+					else if (type == 'ulong') { return blend.read32(); }
+					else if (type == 'float') { return blend.read32(); }
+					else if (type == 'double') { return 0; } //blend.read64(); }
+					else if (type == 'int64_t') { return 0; } //blend.read64(); }
+					else if (type == 'uint64_t') { return 0; } //blend.read64(); }
+					else if (type == 'void') { return 0; }
 				}
-				else if (dna.types[typeIndex] == 'char') { return 0; } // 1
-				else if (dna.types[typeIndex] == 'uchar') { return 0; } // 1
-				else if (dna.types[typeIndex] == 'short') { return 0; } // 2
-				else if (dna.types[typeIndex] == 'ushort') { return 0; } // 2
-				else if (dna.types[typeIndex] == 'long') { return 0; } // 4
-				else if (dna.types[typeIndex] == 'ulong') { return 0; } //4
-				else if (dna.types[typeIndex] == 'float') { return 0; } // 4
-				else if (dna.types[typeIndex] == 'double') { return 0; } // 8
-				else if (dna.types[typeIndex] == 'int64_t') { return 0; } // 8
-				else if (dna.types[typeIndex] == 'uint64_t') { return 0; } // 8
-				else if (dna.types[typeIndex] == 'void') { return 0; } // 0
-
 				// Structure
 				var h = new Handle();
 				h.ds = Blend.getStruct(dna, typeIndex);
