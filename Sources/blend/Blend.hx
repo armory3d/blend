@@ -25,6 +25,7 @@ class Blend {
 	// Data
 	public var blocks:Array<Block> = [];
 	public var dna:Dna;
+	public var map = new Map<Int, Block>(); // Map blocks by memory address
 
 	public function new(blob:Blob) {
 		this.blob = blob;
@@ -76,7 +77,6 @@ class Blend {
 	}
 
 	function parse() {
-
 		// Pointer size: _ 32bit, - 64bit
 		pointerSize = readChar() == '_' ? 4 : 8;
 
@@ -85,10 +85,12 @@ class Blend {
 		if (littleEndian) {
 			read16 = read16LE;
 			read32 = read32LE;
+			readf32 = readf32LE;
 		}
 		else {
 			read16 = read16BE;
 			read32 = read32BE;
+			readf32 = readf32BE;
 		}
 
 		version = readChars(3);
@@ -96,14 +98,11 @@ class Blend {
 		// Reading file blocks
 		// Header - data
 		while (pos < blob.length) {
-
 			align();
-
 			var b = new Block();
 
 			// Block type
 			b.code = readChars(4);
-
 			if (b.code == 'ENDB') break;
 			
 			blocks.push(b);
@@ -112,7 +111,10 @@ class Blend {
 			// Total block length
 			b.size = read32();
 
-			// var addr;
+			// Memory address
+			b.addr = read32(); // TODO: 64bit read
+			map.set(b.addr, b);
+			pos -= 4;
 			pos += pointerSize;
 
 			// Index of dna struct contained in this block
@@ -135,7 +137,6 @@ class Blend {
 				}
 				align();
 
-
 				var typeId = readChars(4); // TYPE
 				var typesCount = read32();
 				for (i in 0...typesCount) {
@@ -143,13 +144,11 @@ class Blend {
 				}
 				align();
 
-
 				var lenId = readChars(4); // TLEN
 				for (i in 0...typesCount) {
 					dna.typesLength.push(read16());
 				}
 				align();
-
 
 				var structId = readChars(4); // STRC
 				var structCount = read32();
@@ -189,6 +188,7 @@ class Blend {
 
 	public var read16:Void->Int;
 	public var read32:Void->Int;
+	public var readf32:Void->Float;
 
 	function read16LE():Int {
 		var i = blob.readS16LE(pos);
@@ -202,6 +202,12 @@ class Blend {
 		return i;
 	}
 
+	function readf32LE():Float {
+		var f = blob.readF32LE(pos);
+		pos += 4;
+		return f;
+	}
+
 	function read16BE():Int {
 		var i = blob.readS16BE(pos);
 		pos += 2;
@@ -212,6 +218,36 @@ class Blend {
 		var i = blob.readS32BE(pos);
 		pos += 4;
 		return i;
+	}
+
+	function readf32BE():Float {
+		var f = blob.readF32BE(pos);
+		pos += 4;
+		return f;
+	}
+
+	public function read8array(len:Int):haxe.io.Int32Array {
+		var ar = new haxe.io.Int32Array(len);
+		for (i in 0...len) ar[i] = read8();
+		return ar;
+	}
+
+	public function read16array(len:Int):haxe.io.Int32Array {
+		var ar = new haxe.io.Int32Array(len);
+		for (i in 0...len) ar[i] = read16();
+		return ar;
+	}
+
+	public function read32array(len:Int):haxe.io.Int32Array {
+		var ar = new haxe.io.Int32Array(len);
+		for (i in 0...len) ar[i] = read32();
+		return ar;
+	}
+
+	public function readf32array(len:Int):kha.arrays.Float32Array {
+		var ar = new kha.arrays.Float32Array(len);
+		for (i in 0...len) ar[i] = readf32();
+		return ar;
 	}
 
 	public function readString():String {
@@ -239,7 +275,7 @@ class Block {
 	public var blend:Blend;
 	public var code:String;
 	public var size:Int;
-	// public var addr:Dynamic;
+	public var addr:Int;
 	public var sdnaIndex:Int;
 	public var count:Int;
 	public var pos:Int; // Byte pos of data start in blob
@@ -279,11 +315,11 @@ class Handle {
 		return size;
 	}
 	function baseName(s:String):String {
-		if (s.charAt(0) == '*') s = s.substring(1, s.length);
+		while (s.charAt(0) == '*') s = s.substring(1, s.length);
 		if (s.charAt(s.length - 1) == ']') s = s.substring(0, s.indexOf('['));
 		return s;
 	}
-	public function get(name:String):Dynamic {
+	public function get(name:String, index = 0):Dynamic {
 		// Return raw type or structure
 		var dna = ds.dna;
 		for (i in 0...ds.fieldNames.length) {
@@ -298,27 +334,38 @@ class Handle {
 				if (typeIndex < 12) {
 					var blend = block.blend;
 					blend.pos = block.pos + newOffset;
-					if (type == 'int') return blend.read32();
-					else if (type == 'char') {
-						var isString = dnaName.charAt(dnaName.length - 1) == ']';
-						return isString ? blend.readString() : blend.read8();
+					var isArray = dnaName.charAt(dnaName.length - 1) == ']';
+					var len = isArray ? Std.parseInt(dnaName.substring(dnaName.indexOf('[') + 1, dnaName.indexOf(']'))) : 1;
+					switch (type) {
+					case 'int': return isArray ? blend.read32array(len) : blend.read32();
+					case 'char': return isArray ? blend.readString() : blend.read8();
+					case 'uchar': return isArray ? blend.read8array(len) : blend.read8();
+					case 'short': return isArray ? blend.read16array(len) : blend.read16();
+					case 'ushort': return isArray ? blend.read16array(len) : blend.read16();
+					case 'float': return isArray ? blend.readf32array(len) : blend.readf32();
+					case 'double': return 0; //blend.read64();
+					case 'long': return isArray ? blend.read32array(len) : blend.read32();
+					case 'ulong': return isArray ? blend.read32array(len) : blend.read32();
+					case 'int64_t': return 0; //blend.read64();
+					case 'uint64_t': return 0; //blend.read64();
+					case 'void': return 0;
 					}
-					else if (type == 'uchar') { return blend.read8(); }
-					else if (type == 'short') { return blend.read16(); }
-					else if (type == 'ushort') { return blend.read16(); }
-					else if (type == 'long') { return blend.read32(); }
-					else if (type == 'ulong') { return blend.read32(); }
-					else if (type == 'float') { return blend.read32(); }
-					else if (type == 'double') { return 0; } //blend.read64(); }
-					else if (type == 'int64_t') { return 0; } //blend.read64(); }
-					else if (type == 'uint64_t') { return 0; } //blend.read64(); }
-					else if (type == 'void') { return 0; }
 				}
 				// Structure
 				var h = new Handle();
 				h.ds = Blend.getStruct(dna, typeIndex);
-				h.block = block;
-				h.offset = newOffset;
+				var isPointer = dnaName.charAt(0) == '*';
+				if (isPointer) {
+					block.blend.pos = block.pos + newOffset;
+					var addr = block.blend.read32(); // TODO: 64bit read
+					h.block = block.blend.map.get(addr);
+					h.offset = 0;
+				}
+				else {
+					h.block = block;
+					h.offset = newOffset;
+				}
+				h.offset += dna.typesLength[typeIndex] * index;
 				return h;
 			}
 		}
