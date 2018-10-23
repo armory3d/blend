@@ -25,7 +25,7 @@ class Blend {
 	// Data
 	public var blocks:Array<Block> = [];
 	public var dna:Dna;
-	public var map = new Map<Int, Block>(); // Map blocks by memory address
+	public var map = new Map<Int, Map<Int, Block>>(); // Map blocks by memory address
 
 	public function new(blob:Blob) {
 		this.blob = blob;
@@ -85,11 +85,13 @@ class Blend {
 		if (littleEndian) {
 			read16 = read16LE;
 			read32 = read32LE;
+			read64 = read64LE;
 			readf32 = readf32LE;
 		}
 		else {
 			read16 = read16BE;
 			read32 = read32BE;
+			read64 = read64BE;
 			readf32 = readf32BE;
 		}
 
@@ -112,10 +114,9 @@ class Blend {
 			b.size = read32();
 
 			// Memory address
-			b.addr = read32(); // TODO: 64bit read
-			map.set(b.addr, b);
-			pos -= 4;
-			pos += pointerSize;
+			var addr = readPointer();
+			if (!map.exists(addr.high)) map.set(addr.high, new Map<Int, Block>());
+			map.get(addr.high).set(addr.low, b);
 
 			// Index of dna struct contained in this block
 			b.sdnaIndex = read32();
@@ -188,6 +189,7 @@ class Blend {
 
 	public var read16:Void->Int;
 	public var read32:Void->Int;
+	public var read64:Void->haxe.Int64;
 	public var readf32:Void->Float;
 
 	function read16LE():Int {
@@ -200,6 +202,10 @@ class Blend {
 		var i = blob.readS32LE(pos);
 		pos += 4;
 		return i;
+	}
+
+	function read64LE():haxe.Int64 {
+		return haxe.Int64.make(read32(), read32());
 	}
 
 	function readf32LE():Float {
@@ -218,6 +224,10 @@ class Blend {
 		var i = blob.readS32BE(pos);
 		pos += 4;
 		return i;
+	}
+
+	function read64BE():haxe.Int64 {
+		return haxe.Int64.make(read32(), read32());
 	}
 
 	function readf32BE():Float {
@@ -269,13 +279,16 @@ class Blend {
 	public function readChar():String {
 		return String.fromCharCode(read8());
 	}
+
+	public function readPointer():haxe.Int64 {
+		return pointerSize == 4 ? haxe.Int64.ofInt(read32()) : read64();
+	}
 }
 
 class Block {
 	public var blend:Blend;
 	public var code:String;
 	public var size:Int;
-	public var addr:Int;
 	public var sdnaIndex:Int;
 	public var count:Int;
 	public var pos:Int; // Byte pos of data start in blob
@@ -343,7 +356,7 @@ class Handle {
 					case 'short': return isArray ? blend.read16array(len) : blend.read16();
 					case 'ushort': return isArray ? blend.read16array(len) : blend.read16();
 					case 'float': return isArray ? blend.readf32array(len) : blend.readf32();
-					case 'double': return 0; //blend.read64();
+					case 'double': return 0; //blend.readf64();
 					case 'long': return isArray ? blend.read32array(len) : blend.read32();
 					case 'ulong': return isArray ? blend.read32array(len) : blend.read32();
 					case 'int64_t': return 0; //blend.read64();
@@ -357,8 +370,11 @@ class Handle {
 				var isPointer = dnaName.charAt(0) == '*';
 				if (isPointer) {
 					block.blend.pos = block.pos + newOffset;
-					var addr = block.blend.read32(); // TODO: 64bit read
-					h.block = block.blend.map.get(addr);
+					var addr = block.blend.readPointer();
+					if (block.blend.map.exists(addr.high)) {
+						h.block = block.blend.map.get(addr.high).get(addr.low);
+					}
+					else h.block = block;
 					h.offset = 0;
 				}
 				else {
