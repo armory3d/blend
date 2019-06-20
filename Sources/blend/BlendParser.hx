@@ -4,7 +4,7 @@
 // https://github.com/fschutt/mystery-of-the-blend-backup
 // https://web.archive.org/web/20170630054951/http://www.atmind.nl/blender/mystery_ot_blend.html
 // Usage:
-// var bl = new Blend(blob:kha.Blob);
+// var bl = new BlendParser(blob:kha.Blob);
 // trace(bl.dir("Scene"));
 // var scenes = bl.get("Scene");
 // trace(scenes[0].get("id").get("name"));
@@ -13,7 +13,7 @@ package blend;
 // https://github.com/Kode/Kha
 import kha.Blob;
 
-class Blend {
+class BlendParser {
 
 	public var pos:Int;
 	var blob:Blob;
@@ -24,7 +24,7 @@ class Blend {
 	public var littleEndian:Bool;
 	// Data
 	public var blocks:Array<Block> = [];
-	public var dna:Dna;
+	public var dna:Dna = null;
 	public var map = new Map<Int, Map<Int, Block>>(); // Map blocks by memory address
 
 	public function new(blob:Blob) {
@@ -50,6 +50,7 @@ class Blend {
 	}
 
 	public function get(type:String):Array<Handle> {
+		if (dna == null) return null;
 		// Return all structures of type
 		var typeIndex = getTypeIndex(dna, type);
 		if (typeIndex == -1) return null;
@@ -286,7 +287,7 @@ class Blend {
 }
 
 class Block {
-	public var blend:Blend;
+	public var blend:BlendParser;
 	public var code:String;
 	public var size:Int;
 	public var sdnaIndex:Int;
@@ -332,7 +333,7 @@ class Handle {
 		if (s.charAt(s.length - 1) == ']') s = s.substring(0, s.indexOf('['));
 		return s;
 	}
-	public function get(name:String, index = 0):Dynamic {
+	public function get(name:String, index = 0, asType:String = null):Dynamic {
 		// Return raw type or structure
 		var dna = ds.dna;
 		for (i in 0...ds.fieldNames.length) {
@@ -343,6 +344,12 @@ class Handle {
 				var type = dna.types[typeIndex];
 				var newOffset = offset;
 				for (j in 0...i) newOffset += getSize(j);
+				// Cast void* to type
+				if (asType != null) {
+					for (i in 0...dna.types.length) {
+						if (dna.types[i] == asType) { typeIndex = i; break; }
+					}
+				}
 				// Raw type
 				if (typeIndex < 12) {
 					var blend = block.blend;
@@ -359,14 +366,14 @@ class Handle {
 					case 'double': return 0; //blend.readf64();
 					case 'long': return isArray ? blend.read32array(len) : blend.read32();
 					case 'ulong': return isArray ? blend.read32array(len) : blend.read32();
-					case 'int64_t': return 0; //blend.read64();
-					case 'uint64_t': return 0; //blend.read64();
+					case 'int64_t': return blend.read64();
+					case 'uint64_t': return blend.read64();
 					case 'void': return 0;
 					}
 				}
 				// Structure
 				var h = new Handle();
-				h.ds = Blend.getStruct(dna, typeIndex);
+				h.ds = BlendParser.getStruct(dna, typeIndex);
 				var isPointer = dnaName.charAt(0) == '*';
 				if (isPointer) {
 					block.blend.pos = block.pos + newOffset;

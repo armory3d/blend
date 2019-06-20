@@ -9,7 +9,7 @@ Usage:
 
 ```hx
 Data.getBlob("test.blend", function(blob:kha.Blob) {
-	var bl = new Blend(blob);
+	var bl = new BlendParser(blob);
 	trace(bl.dir("Scene")); // List Scene fields
 	var scenes = bl.get("Scene"); // Get scenes
 	if (scenes.length > 0) {
